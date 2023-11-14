@@ -1,30 +1,51 @@
-use proc_macro2::Ident;
-use syn::{punctuated::Punctuated, Attribute, GenericParam, Generics, Token, TypeParamBound};
+use std::fmt;
+
+use proc_macro2::{Ident, Span};
+use syn::{
+    ext::IdentExt, punctuated::Punctuated, Attribute, GenericParam, Generics, Token, TypeParamBound,
+};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Repr {
     Tuple,
-    ProperList,
-    CurriedArgs,
+    List,
+    Curry,
 }
 
-impl ToString for Repr {
-    fn to_string(&self) -> String {
-        match self {
-            Self::Tuple => "tuple".to_string(),
-            Self::ProperList => "proper_list".to_string(),
-            Self::CurriedArgs => "curried_args".to_string(),
-        }
+impl fmt::Display for Repr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Tuple => "tuple",
+            Self::List => "list",
+            Self::Curry => "curry",
+        })
     }
 }
 
-pub struct ClvmDeriveArgs {
-    pub repr: Repr,
+pub struct Args {
+    pub repr: Option<Repr>,
+    pub raw_enum: bool,
+    pub int_repr: Ident,
 }
 
-pub fn parse_args(attrs: &[Attribute]) -> ClvmDeriveArgs {
-    let mut repr: Option<Repr> = None;
+pub fn parse_args(attrs: &[Attribute]) -> Args {
+    let (repr, raw_enum) = parse_repr(attrs);
+    let int_repr = parse_int_repr(attrs);
 
+    Args {
+        repr,
+        raw_enum,
+        int_repr: int_repr.unwrap_or(Ident::new("isize", Span::call_site())),
+    }
+}
+
+pub fn expect_repr(repr: Option<Repr>) -> Repr {
+    repr.expect("expected clvm attribute parameter of either `tuple`, `list`, or `curry`")
+}
+
+pub fn parse_repr(attrs: &[Attribute]) -> (Option<Repr>, bool) {
+    let mut repr: Option<Repr> = None;
+    let mut raw_enum = false;
     for attr in attrs {
         if let Some(ident) = attr.path().get_ident() {
             if ident == "clvm" {
@@ -33,37 +54,43 @@ pub fn parse_args(attrs: &[Attribute]) -> ClvmDeriveArgs {
                     .unwrap();
 
                 for arg in args {
+                    let existing = repr;
+
                     match arg.to_string().as_str() {
-                        "tuple" => {
-                            if let Some(existing) = repr {
-                                panic!("`tuple` conflicts with `{}`", existing.to_string());
+                        "tuple" => repr = Some(Repr::Tuple),
+                        "list" => repr = Some(Repr::List),
+                        "curry" => repr = Some(Repr::Curry),
+                        "raw" => {
+                            if raw_enum {
+                                panic!("`raw` specified twice");
+                            } else {
+                                raw_enum = true;
                             }
-                            repr = Some(Repr::Tuple);
+                            continue;
                         }
-                        "proper_list" => {
-                            if let Some(existing) = repr {
-                                panic!("`proper_list` conflicts with `{}`", existing.to_string());
-                            }
-                            repr = Some(Repr::ProperList);
-                        }
-                        "curried_args" => {
-                            if let Some(existing) = repr {
-                                panic!("`curried_args` conflicts with `{}`", existing.to_string());
-                            }
-                            repr = Some(Repr::CurriedArgs);
-                        }
-                        ident => panic!("unknown argument `{}`", ident),
+                        ident => panic!("unknown argument `{ident}`"),
+                    }
+
+                    if let Some(existing) = existing {
+                        panic!("`{arg}` conflicts with `{existing}`");
                     }
                 }
             }
         }
     }
+    (repr, raw_enum)
+}
 
-    ClvmDeriveArgs {
-        repr: repr.expect(
-            "expected clvm attribute parameter of either `tuple`, `proper_list`, or `curried_args`",
-        ),
+fn parse_int_repr(attrs: &[Attribute]) -> Option<Ident> {
+    let mut int_repr: Option<Ident> = None;
+    for attr in attrs {
+        if let Some(ident) = attr.path().get_ident() {
+            if ident == "repr" {
+                int_repr = Some(attr.parse_args_with(Ident::parse_any).unwrap());
+            }
+        }
     }
+    int_repr
 }
 
 pub fn add_trait_bounds(generics: &mut Generics, bound: TypeParamBound) {

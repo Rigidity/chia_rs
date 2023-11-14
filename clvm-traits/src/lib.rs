@@ -8,8 +8,8 @@
 //! with one of the following encodings:
 //!
 //! * `#[clvm(tuple)]` for unterminated lists such as `(A . (B . C))`.
-//! * `#[clvm(proper_list)]` for proper lists such as `(A B C)`, or in other words `(A . (B . (C . ())))`.
-//! * `#[clvm(curried_args)]` for curried arguments such as `(c (q . A) (c (q . B) (c (q . C) 1)))`.
+//! * `#[clvm(list)]` for proper lists such as `(A B C)`, or in other words `(A . (B . (C . ())))`.
+//! * `#[clvm(curry)]` for curried arguments such as `(c (q . A) (c (q . B) (c (q . C) 1)))`.
 
 #![cfg_attr(
     feature = "derive",
@@ -18,7 +18,7 @@
 
 ```rust
 use clvmr::Allocator;
-use clvm_traits::{ToClvm, FromClvm};
+use clvm_traits::{ToClvm, FromClvm, ToPtr, FromPtr};
 
 #[derive(Debug, PartialEq, Eq, ToClvm, FromClvm)]
 #[clvm(tuple)]
@@ -30,9 +30,9 @@ struct Point {
 let a = &mut Allocator::new();
 
 let point = Point { x: 5, y: 2 };
-let ptr = point.to_clvm(a).unwrap();
+let ptr = point.to_ptr(a).unwrap();
 
-assert_eq!(Point::from_clvm(a, ptr).unwrap(), point);
+assert_eq!(Point::from_ptr(a, ptr).unwrap(), point);
 ```
 "#
 )]
@@ -40,16 +40,22 @@ assert_eq!(Point::from_clvm(a, ptr).unwrap(), point);
 #[cfg(feature = "derive")]
 pub use clvm_derive::*;
 
+mod clvm_value;
+mod conversions;
 mod error;
 mod from_clvm;
 mod macros;
 mod match_byte;
 mod to_clvm;
+mod wrappers;
 
+pub use clvm_value::*;
+pub use conversions::*;
 pub use error::*;
 pub use from_clvm::*;
 pub use match_byte::*;
 pub use to_clvm::*;
+pub use wrappers::*;
 
 #[cfg(test)]
 #[cfg(feature = "derive")]
@@ -58,18 +64,18 @@ mod tests {
 
     use std::fmt;
 
-    use clvmr::{serde::node_to_bytes, Allocator};
+    use clvmr::{allocator::NodePtr, serde::node_to_bytes, Allocator};
 
     use super::*;
 
     fn check<T>(value: T, expected: &str)
     where
-        T: fmt::Debug + PartialEq + ToClvm + FromClvm,
+        T: fmt::Debug + PartialEq + ToClvm<NodePtr> + FromClvm<NodePtr>,
     {
         let a = &mut Allocator::new();
 
-        let ptr = value.to_clvm(a).unwrap();
-        let round_trip = T::from_clvm(a, ptr).unwrap();
+        let ptr = value.to_ptr(a).unwrap();
+        let round_trip = T::from_ptr(a, ptr).unwrap();
         assert_eq!(value, round_trip);
 
         let bytes = node_to_bytes(a, ptr).unwrap();
@@ -90,9 +96,9 @@ mod tests {
     }
 
     #[test]
-    fn test_proper_list() {
+    fn test_list() {
         #[derive(Debug, ToClvm, FromClvm, PartialEq, Eq)]
-        #[clvm(proper_list)]
+        #[clvm(list)]
         struct ProperListStruct {
             a: u64,
             b: i32,
@@ -102,9 +108,9 @@ mod tests {
     }
 
     #[test]
-    fn test_curried_args() {
+    fn test_curry() {
         #[derive(Debug, ToClvm, FromClvm, PartialEq, Eq)]
-        #[clvm(curried_args)]
+        #[clvm(curry)]
         struct CurriedArgsStruct {
             a: u64,
             b: i32,
@@ -132,5 +138,49 @@ mod tests {
         struct NewTypeStruct(String);
 
         check(NewTypeStruct("XYZ".to_string()), "8358595a");
+    }
+
+    #[test]
+    fn test_enum() {
+        #[derive(Debug, ToClvm, FromClvm, PartialEq, Eq)]
+        #[clvm(tuple)]
+        enum Enum {
+            A(i32),
+            B { x: i32 },
+            C,
+        }
+
+        check(Enum::A(32), "ff8020");
+        check(Enum::B { x: -72 }, "ff0181b8");
+        check(Enum::C, "ff0280");
+    }
+
+    #[test]
+    fn test_raw_enum() {
+        #[derive(Debug, ToClvm, FromClvm, PartialEq, Eq)]
+        #[clvm(tuple, raw)]
+        enum Enum {
+            A(i32),
+
+            #[clvm(list)]
+            B {
+                x: i32,
+                y: i32,
+            },
+
+            #[clvm(curry)]
+            C {
+                curried_value: String,
+            },
+        }
+
+        check(Enum::A(32), "20");
+        check(Enum::B { x: -72, y: 94 }, "ff81b8ff5e80");
+        check(
+            Enum::C {
+                curried_value: "Hello".to_string(),
+            },
+            "ff04ffff018548656c6c6fff0180",
+        );
     }
 }

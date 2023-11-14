@@ -5,7 +5,7 @@
 //!
 //! ```rust
 //! use clvm_utils::CurriedProgram;
-//! use clvm_traits::{ToClvm, clvm_curried_args};
+//! use clvm_traits::{ToClvm, ToPtr, clvm_curried_args};
 //! use clvmr::{Allocator, serde::node_to_bytes};
 //!
 //! let a = &mut Allocator::new();
@@ -16,7 +16,7 @@
 //!     program,
 //!     args: clvm_curried_args!(42, 75),
 //! }
-//! .to_clvm(a)
+//! .to_ptr(a)
 //! .unwrap();
 //!
 //! let hex = hex::encode(node_to_bytes(a, ptr).unwrap());
