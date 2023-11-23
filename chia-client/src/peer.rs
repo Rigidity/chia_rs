@@ -136,7 +136,7 @@ impl Peer {
         let message_id = {
             let mut nonce = self.nonce.lock().await;
             let id = *nonce;
-            *nonce += 1;
+            *nonce = nonce.wrapping_add(1);
             id
         };
 
